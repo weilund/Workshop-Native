@@ -591,6 +591,129 @@ class PublicWorkshopBrowseParserTest {
         assertTrue(result.isExplicitlyEmpty)
     }
 
+    @Test
+    fun parse_reads_tag_groups_from_valve_ssr_data_script() {
+        val declaredTags = """{"declaredTags":{"readytouse_tags":[{"name":"Type","htmlelement":"dropdown","tags":[{"name":"Scene","display_name":"Scene","admin_only":false},{"name":"Video","display_name":"Video","admin_only":false}]}]}}"""
+        val workshopNumbers = """{"workshopNumbers":{"total":120,"total_incompatible":3}}"""
+        val html = valveSsrDataHtml(
+            loaderData = listOf(declaredTags, workshopNumbers),
+            body = """
+                <div class="summary">2,937,718 个条目符合筛选条件</div>
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=123">Item 123</a>
+            """.trimIndent(),
+        )
+
+        val result = PublicWorkshopBrowseParser.parse(
+            appId = 431960,
+            query = WorkshopBrowseQuery(
+                page = 1,
+                sectionKey = WorkshopBrowseQuery.SECTION_ITEMS,
+            ),
+            html = html,
+            baseUrl = "https://steamcommunity.com/workshop/browse/?appid=431960",
+        )
+
+        assertEquals(1, result.tagGroups.size)
+        assertEquals("Type", result.tagGroups.single().label)
+        assertEquals(listOf("Scene", "Video"), result.tagGroups.single().tags.map { it.value })
+        assertEquals(
+            com.slay.workshopnative.data.model.WorkshopBrowseTagGroupSelectionMode.SingleSelect,
+            result.tagGroups.single().selectionMode,
+        )
+        assertEquals(2937718, result.totalCount)
+        assertTrue(result.supportsIncompatibleFilter)
+    }
+
+    @Test
+    fun parse_prefers_legacy_loader_data_over_valve_ssr_data_script() {
+        val legacyLoaderData = """{"declaredTags":{"readytouse_tags":[{"name":"Legacy","htmlelement":"checkbox","tags":[{"name":"Old","display_name":"Old","admin_only":false}]}]}}"""
+        val queryData = """
+            {
+              "mutations": [],
+              "queries": [
+                {
+                  "queryKey": [
+                    "workshop_browse",
+                    {
+                      "appid": 431960,
+                      "browse_sort": "trend",
+                      "section": "readytouseitems",
+                      "page": 1,
+                      "trend_days": 7
+                    }
+                  ],
+                  "state": {
+                    "data": {
+                      "current_page": 1,
+                      "total_pages": 1,
+                      "total_count": 1,
+                      "results": []
+                    }
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+        val newLoaderData = """{"declaredTags":{"readytouse_tags":[{"name":"New","htmlelement":"checkbox","tags":[{"name":"NewTag","display_name":"NewTag","admin_only":false}]}]}}"""
+        val newPayload = """{"loaderData":${Json.encodeToString(listOf(newLoaderData))}}"""
+        val html = ssrHtml(listOf(legacyLoaderData), queryData) +
+            """<script type="application/json" id="valve-ssr-data">$newPayload</script>"""
+
+        val result = PublicWorkshopBrowseParser.parse(
+            appId = 431960,
+            query = WorkshopBrowseQuery(page = 1, sectionKey = WorkshopBrowseQuery.SECTION_ITEMS),
+            html = html,
+            baseUrl = "https://steamcommunity.com/workshop/browse/?appid=431960",
+        )
+
+        assertEquals(listOf("Legacy"), result.tagGroups.map { it.label })
+    }
+
+    @Test
+    fun parse_falls_back_to_dom_tags_when_valve_ssr_data_is_broken() {
+        val html = """
+            <html>
+            <body>
+            <div class="rightDetailsBlock">
+              <div class="tag_category_desc">风格</div>
+              <div class="filterOption">
+                <label>
+                  <input class="inputTagsFilter" name="requiredtags[]" value="anime" />
+                  动漫
+                </label>
+              </div>
+            </div>
+            <script type="application/json" id="valve-ssr-data">{"loaderData": ["not-a-json</script>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val result = PublicWorkshopBrowseParser.parse(
+            appId = 431960,
+            query = WorkshopBrowseQuery(page = 1, sectionKey = WorkshopBrowseQuery.SECTION_ITEMS),
+            html = html,
+            baseUrl = "https://steamcommunity.com/workshop/browse/?appid=431960",
+        )
+
+        assertEquals(1, result.tagGroups.size)
+        assertEquals(listOf("anime"), result.tagGroups.single().tags.map { it.value })
+    }
+
+    private fun valveSsrDataHtml(
+        loaderData: List<String>,
+        body: String = "",
+    ): String {
+        val payload = """{"route":"/workshop/browse","loaderData":${Json.encodeToString(loaderData)}}"""
+        return """
+            <html>
+            <body>
+            <script type="application/json" id="valve-ssr-data">$payload</script>
+            $body
+            </body>
+            </html>
+        """.trimIndent()
+    }
+
     private fun ssrHtml(
         loaderData: List<String>,
         queryData: String,

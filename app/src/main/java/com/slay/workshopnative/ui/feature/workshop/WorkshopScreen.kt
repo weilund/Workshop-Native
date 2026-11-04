@@ -885,9 +885,27 @@ private fun WorkshopTopBarModern(
                         Icon(Icons.Rounded.Search, contentDescription = null)
                     },
                     trailingIcon = {
-                        if (searchText.isNotBlank()) {
-                            IconButton(onClick = onClearSearch) {
-                                Icon(Icons.Rounded.Close, contentDescription = "清空搜索")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (isBrowseMode) {
+                                IconButton(onClick = onOpenFilters) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FilterAlt,
+                                        contentDescription = "高级筛选",
+                                        tint = if (advancedFilterCount > 0) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                            }
+                            if (searchText.isNotBlank()) {
+                                IconButton(onClick = onClearSearch) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "清空搜索")
+                                }
                             }
                         }
                     },
@@ -2964,8 +2982,13 @@ private fun defaultExpandedWorkshopFilterSections(
         if (query.showIncompatible) {
             add("incompatible")
         }
-        groups.filter { group -> group.hasActiveSelection(query) }
-            .forEach { group -> add(group.sectionKey()) }
+        val selectedGroups = groups.filter { group -> group.hasActiveSelection(query) }
+        if (selectedGroups.isEmpty()) {
+            // 没有已选标签时默认展开第一组，避免标签分组藏在折叠区里没人发现。
+            groups.firstOrNull()?.let { group -> add(group.sectionKey()) }
+        } else {
+            selectedGroups.forEach { group -> add(group.sectionKey()) }
+        }
     }
 }
 

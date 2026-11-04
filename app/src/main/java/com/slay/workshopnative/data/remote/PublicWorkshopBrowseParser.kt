@@ -69,10 +69,11 @@ internal object PublicWorkshopBrowseParser {
         setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
     )
     private val totalCountRegexes = listOf(
-        Regex("""Showing\s+\d+\s*(?:-|to)\s*\d+\s+of\s+([\d,]+)\s+(?:entries|results)""", RegexOption.IGNORE_CASE),
-        Regex("""([\d,]+)\s+(?:entries|results)\s+matching\s+filters""", RegexOption.IGNORE_CASE),
-        Regex("""正在显示第\s*\d+\s*-\s*\d+\s*项，共\s*([\d,]+)\s*项(?:条目|结果)"""),
-        Regex("""共\s*([\d,]+)\s*项(?:条目|结果)"""),
+        Regex("""Showing\s+\d+\s*(?:-|to)\s*\d+\s+of\s+(\d[\d,]*)\s+(?:entries|results)""", RegexOption.IGNORE_CASE),
+        Regex("""(\d[\d,]*)\s+(?:items|entries|results)\s+match(?:ing)?\s+(?:your\s+)?filters""", RegexOption.IGNORE_CASE),
+        Regex("""正在显示第\s*\d+\s*-\s*\d+\s*项，共\s*(\d[\d,]*)\s*项(?:条目|结果)"""),
+        Regex("""(\d[\d,]*)\s*[个個](?:条目|條目)符合(?:您的?)?筛选条件"""),
+        Regex("""共\s*(\d[\d,]*)\s*项(?:条目|结果)"""),
     )
     private val emptyStateRegexes = listOf(
         Regex("""\b0\s+(?:entries|results)\s+matching\s+filters\b""", RegexOption.IGNORE_CASE),
@@ -81,6 +82,10 @@ internal object PublicWorkshopBrowseParser {
         Regex("""没有可显示的创意工坊条目"""),
     )
     private val ssrLoaderDataRegex = Regex("""window\.SSR\.loaderData\s*=\s*(\[[\s\S]*?]);""")
+    private val ssrDataScriptRegex = Regex(
+        """<script\b[^>]*(?<![-\w])id\s*=\s*["']valve-ssr-data["'][^>]*>([\s\S]*?)</script>""",
+        RegexOption.IGNORE_CASE,
+    )
     private val ssrRenderContextRegex = Regex("""window\.SSR\.renderContext\s*=\s*JSON\.parse\("([\s\S]*?)"\);?""")
     private val json = Json {
         ignoreUnknownKeys = true
@@ -396,28 +401,53 @@ internal object PublicWorkshopBrowseParser {
     }
 
     private fun parseSsrLoaderDataObjects(html: String): List<JsonObject> {
-        val rawLoaderData = ssrLoaderDataRegex.find(html)
+        val legacyLoaderDataObjects = ssrLoaderDataRegex.find(html)
             ?.groupValues
             ?.getOrNull(1)
-            ?: return emptyList()
-        val loaderData = runCatching {
-            json.parseToJsonElement(rawLoaderData).jsonArray
-        }.getOrNull() ?: return emptyList()
-        return loaderData.mapNotNull { element ->
-            when (element) {
-                is JsonObject -> element
-                is JsonPrimitive -> {
-                    if (!element.isString) {
-                        null
-                    } else {
-                        runCatching {
-                            json.parseToJsonElement(element.content).jsonObject
-                        }.getOrNull()
-                    }
-                }
-
-                else -> null
+            ?.let { rawLoaderData ->
+                runCatching {
+                    json.parseToJsonElement(rawLoaderData).jsonArray
+                }.getOrNull()
+                    ?.mapNotNull { element -> element.toSsrLoaderDataObject() }
             }
+            .orEmpty()
+        if (legacyLoaderDataObjects.isNotEmpty()) {
+            return legacyLoaderDataObjects
+        }
+        if (!html.contains("valve-ssr-data")) {
+            return emptyList()
+        }
+        // 新版 Steam 工坊页改成了 <script id="valve-ssr-data"> 内嵌 JSON，
+        // 旧版 window.SSR.loaderData 不再输出；按新结构兜底提取，否则标签组会一直是空列表。
+        return ssrDataScriptRegex.findAll(html)
+            .mapNotNull { match ->
+                runCatching {
+                    json.parseToJsonElement(match.groupValues[1]).jsonObject
+                }.getOrNull()
+            }
+            .flatMap { payload ->
+                when (val loaderData = payload["loaderData"]) {
+                    is JsonArray -> loaderData.asSequence()
+                    is JsonObject -> sequenceOf(loaderData)
+                    else -> emptySequence()
+                }
+            }
+            .mapNotNull { element -> element.toSsrLoaderDataObject() }
+            .toList()
+    }
+
+    private fun JsonElement.toSsrLoaderDataObject(): JsonObject? {
+        return when (this) {
+            is JsonObject -> this
+            is JsonPrimitive -> if (isString) {
+                runCatching {
+                    json.parseToJsonElement(content).jsonObject
+                }.getOrNull()
+            } else {
+                null
+            }
+
+            else -> null
         }
     }
 
