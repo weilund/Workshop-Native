@@ -16,6 +16,7 @@ import com.slay.workshopnative.data.model.WorkshopBrowseSortOption
 import com.slay.workshopnative.data.model.WorkshopBrowseTagGroup
 import com.slay.workshopnative.data.model.WorkshopItem
 import com.slay.workshopnative.data.preferences.UserPreferencesStore
+import com.slay.workshopnative.data.preferences.SavedWorkshopFilter
 import com.slay.workshopnative.data.preferences.displayLabel
 import com.slay.workshopnative.data.repository.DownloadsRepository
 import com.slay.workshopnative.data.repository.SteamRepository
@@ -92,10 +93,16 @@ class WorkshopViewModel @Inject constructor(
     private var allowAuthenticatedFallback = true
     private var currentSessionStatus = SessionStatus.Idle
     private var currentAccountName = ""
+    private var savedWorkshopFilter: SavedWorkshopFilter? = null
+    private var savedWorkshopFilterLoaded = false
 
     init {
         viewModelScope.launch {
             downloadsRepository.reconcileActiveTasks()
+        }
+        viewModelScope.launch {
+            savedWorkshopFilter = runCatching { preferencesStore.readSavedWorkshopFilter() }.getOrNull()
+            savedWorkshopFilterLoaded = true
         }
         observePreferences()
         observeSession()
@@ -144,6 +151,21 @@ class WorkshopViewModel @Inject constructor(
         } else {
             ""
         }
+        val baseQuery = WorkshopBrowseQuery(
+            sectionKey = if (effectiveLaunchMode == WorkshopLaunchMode.Subscriptions) {
+                WorkshopBrowseQuery.SECTION_MY_SUBSCRIPTIONS
+            } else {
+                WorkshopBrowseQuery.SECTION_ITEMS
+            },
+            searchText = preservedSearchText,
+            pageSize = workshopPageSize,
+        )
+        val restoredWorkshopFilter = if (effectiveLaunchMode == WorkshopLaunchMode.Browse) {
+            savedWorkshopFilter?.takeIf { filter -> filter.appId == appId }
+        } else {
+            null
+        }
+        val initialQuery = restoredWorkshopFilter?.toQuery(baseQuery) ?: baseQuery
         _uiState.update {
             it.copy(
                 appId = appId,
@@ -154,15 +176,7 @@ class WorkshopViewModel @Inject constructor(
                 hasLoadedOnce = false,
                 isResolvingSelection = false,
                 items = emptyList(),
-                query = WorkshopBrowseQuery(
-                    sectionKey = if (effectiveLaunchMode == WorkshopLaunchMode.Subscriptions) {
-                        WorkshopBrowseQuery.SECTION_MY_SUBSCRIPTIONS
-                    } else {
-                        WorkshopBrowseQuery.SECTION_ITEMS
-                    },
-                    searchText = preservedSearchText,
-                    pageSize = workshopPageSize,
-                ),
+                query = initialQuery,
                 totalCount = 0,
                 hasMore = false,
                 sectionOptions = if (effectiveLaunchMode == WorkshopLaunchMode.Subscriptions) {
@@ -196,6 +210,33 @@ class WorkshopViewModel @Inject constructor(
         }
 
         refresh(forceRefresh = false)
+        restoreSavedFilterIfLoadedLate(
+            appId = appId,
+            launchMode = effectiveLaunchMode,
+            baseQuery = baseQuery,
+        )
+    }
+
+    private fun restoreSavedFilterIfLoadedLate(
+        appId: Int,
+        launchMode: WorkshopLaunchMode,
+        baseQuery: WorkshopBrowseQuery,
+    ) {
+        if (savedWorkshopFilterLoaded || launchMode != WorkshopLaunchMode.Browse) return
+        viewModelScope.launch {
+            val filter = runCatching { preferencesStore.readSavedWorkshopFilter() }.getOrNull()
+            savedWorkshopFilter = filter
+            savedWorkshopFilterLoaded = true
+            val current = _uiState.value
+            if (current.appId == appId &&
+                current.launchMode == WorkshopLaunchMode.Browse &&
+                current.query == baseQuery &&
+                filter?.appId == appId
+            ) {
+                _uiState.update { state -> state.copy(query = filter.toQuery(baseQuery)) }
+                loadPage(targetPage = 1, showRefresh = true, forceRefresh = false)
+            }
+        }
     }
 
     fun openSubscriptionsMode() {
@@ -257,11 +298,31 @@ class WorkshopViewModel @Inject constructor(
                 actionMessage = null,
             )
         }
+        persistWorkshopFilter(normalizedQuery)
         loadPage(
             targetPage = normalizedQuery.page,
             showRefresh = true,
             forceRefresh = false,
         )
+    }
+
+    /**
+     * 记住当前工坊页的筛选条件，退出应用后再次进入同一游戏的工坊时可以恢复。
+     * 只保存筛选相关字段，搜索词和页码不保存。
+     */
+    private fun persistWorkshopFilter(query: WorkshopBrowseQuery) {
+        val state = _uiState.value
+        if (state.launchMode != WorkshopLaunchMode.Browse || state.appId <= 0) return
+        val saved = SavedWorkshopFilter.from(
+            query = query,
+            appId = state.appId,
+            savedAtMs = System.currentTimeMillis(),
+        )
+        savedWorkshopFilter = saved
+        savedWorkshopFilterLoaded = true
+        viewModelScope.launch {
+            runCatching { preferencesStore.saveWorkshopFilter(saved) }
+        }
     }
 
     fun prefetchItemMetadata(publishedFileIds: Collection<Long>) {

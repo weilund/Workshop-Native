@@ -190,6 +190,7 @@ class UserPreferencesStore @Inject constructor(
         val PREFER_ANONYMOUS_DOWNLOADS = booleanPreferencesKey("prefer_anonymous_downloads")
         val ALLOW_AUTHENTICATED_DOWNLOAD_FALLBACK = booleanPreferencesKey("allow_authenticated_download_fallback")
         val WORKSHOP_PAGE_SIZE = intPreferencesKey("workshop_page_size")
+        val WORKSHOP_SAVED_FILTER_JSON = stringPreferencesKey("workshop_saved_filter_json")
         val WORKSHOP_AUTO_RESOLVE_VISIBLE_ITEMS = booleanPreferencesKey("workshop_auto_resolve_visible_items")
         val ANIMATED_WORKSHOP_PREVIEW_ENABLED = booleanPreferencesKey("animated_workshop_preview_enabled")
         val TERRARIA_ARCHIVE_POST_PROCESSOR_ENABLED =
@@ -678,6 +679,25 @@ class UserPreferencesStore @Inject constructor(
     suspend fun saveWorkshopPageSize(pageSize: Int) {
         dataStore.edit { prefs ->
             prefs[WORKSHOP_PAGE_SIZE] = WorkshopBrowseQuery.normalizePageSize(pageSize)
+        }
+    }
+
+    /**
+     * 读取上次保存的工坊筛选条件；没有保存过或数据损坏时返回 null。
+     */
+    suspend fun readSavedWorkshopFilter(): SavedWorkshopFilter? {
+        val prefs = try {
+            dataStore.data.first()
+        } catch (exception: IOException) {
+            emptyPreferences()
+        }
+        val raw = prefs[WORKSHOP_SAVED_FILTER_JSON]?.takeIf(String::isNotBlank) ?: return null
+        return runCatching { json.decodeFromString<SavedWorkshopFilter>(raw) }.getOrNull()
+    }
+
+    suspend fun saveWorkshopFilter(filter: SavedWorkshopFilter) {
+        dataStore.edit { prefs ->
+            prefs[WORKSHOP_SAVED_FILTER_JSON] = json.encodeToString(filter)
         }
     }
 
