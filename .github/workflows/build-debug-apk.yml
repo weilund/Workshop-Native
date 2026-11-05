@@ -2,6 +2,15 @@ name: Build debug APK
 
 on:
   workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName（可选，默认 tagfilter-<run number>）"
+        required: false
+        type: string
+      version_code:
+        description: "versionCode（可选，默认 100000+run number）"
+        required: false
+        type: string
   push:
     branches:
       - fix/workshop-tag-filter
@@ -27,10 +36,14 @@ jobs:
 
       - name: Build debug APK
         run: |
+          VERSION_NAME="${{ inputs.version_name }}"
+          VERSION_CODE="${{ inputs.version_code }}"
+          if [ -z "$VERSION_NAME" ]; then VERSION_NAME="tagfilter-${GITHUB_RUN_NUMBER}"; fi
+          if [ -z "$VERSION_CODE" ]; then VERSION_CODE="$((100000 + GITHUB_RUN_NUMBER))"; fi
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug \
-            -PAPP_VERSION_NAME="tagfilter-${GITHUB_RUN_NUMBER}" \
-            -PAPP_VERSION_CODE="$((100000 + GITHUB_RUN_NUMBER))"
+            -PAPP_VERSION_NAME="$VERSION_NAME" \
+            -PAPP_VERSION_CODE="$VERSION_CODE"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
