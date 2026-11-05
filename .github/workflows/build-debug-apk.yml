@@ -11,12 +11,16 @@ on:
         description: "versionCode（可选，默认 100000+run number）"
         required: false
         type: string
+      release_tag:
+        description: "release tag（可选，填写后构建完成会自动发布到该 Release）"
+        required: false
+        type: string
   push:
     branches:
       - fix/workshop-tag-filter
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-debug-apk:
@@ -51,3 +55,13 @@ jobs:
           name: workshop-native-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish release asset
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: Workshop Native ${{ inputs.release_tag }}
+          body_path: CHANGELOG.md
+          files: app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
