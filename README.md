@@ -2,17 +2,34 @@
 
 一个面向 Android 的 Steam 创意工坊下载工具，支持匿名探索公开工坊内容，也支持登录 Steam 后访问“我的内容”和下载已购/共享游戏的创意工坊条目。
 
+> 这是 [`weilund`](https://github.com/weilund) 的 fork，基于上游
+> [`cjtestuse/Workshop-Native`](https://github.com/cjtestuse/Workshop-Native)
+> 最新代码，修复了 Steam 新版创意工坊页面下「标签筛选为空」的问题。
+> 修改说明见 [CHANGELOG.md](CHANGELOG.md)，安装包见
+> [Releases](https://github.com/weilund/Workshop-Native/releases)。
+
 ## 功能
 
 - 匿名访问公开工坊游戏与条目
 - Steam 登录、已保存账号切换
 - 我的内容：已购买游戏、家庭共享游戏
-- 创意工坊浏览、筛选、搜索、分页
+- 创意工坊浏览、筛选、搜索、分页（支持按工坊标签「包含 / 排除」筛选）
 - 下载中心：排队、暂停、继续、重试、取消、单条删除
 - 下载详情：展示下载链路、网络路径、节点地址、源地址等诊断信息
 - 收藏常用工坊游戏
 - 设置页：下载位置、并发、匿名优先、CDN 策略、更新检查
 - GitHub Release 更新检查
+
+## 标签筛选
+
+浏览公开工坊时，点搜索框右侧的筛选按钮，或横向滑动搜索框下方的胶囊行、
+点最后一个「高级筛选」，即可打开筛选面板：
+
+- 按工坊标签分组筛选，例如「类型（场景 / 视频 / 应用程序）」「风格
+  （动漫 / 卡通 / 抽象）」「分辨率」「分类」「资产类型」等；
+- 每个标签支持两种状态：「包含」（条目必须带该标签）和「排除」（条目不能
+  带该标签）；同组内只能选一个值的分组（例如「类型」）按单选处理；
+- 与关键词搜索、排序、时间范围、发布日期范围可以叠加使用，选好后点「应用」。
 
 ## 技术栈
 
@@ -119,6 +136,15 @@ git tag -a v1.0.1 -m $'v1.0.1
 - 完善更新逻辑'
 git push origin v1.0.1
 ```
+
+本 fork 另外提供了一个 debug 构建工作流：
+
+- `.github/workflows/build-debug-apk.yml`
+
+可以手动触发（`workflow_dispatch`），也可以在 push 到 `fix/workshop-tag-filter`
+分支时触发。它会构建 debug APK 并上传 artifact；如果触发时填写了
+`release_tag` 输入，还会自动把 APK 发布到对应的 GitHub Release。
+注意 debug 包与上游正式签名不同，安装前需要先卸载正式版。
 
 ## 说明
 
